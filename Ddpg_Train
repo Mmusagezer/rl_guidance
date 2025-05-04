@@ -1,0 +1,83 @@
+# train_agent.py
+
+from environment import MissileGuidanceEnv, plot_trajectories
+from DDPG_Class import DDPGAgent, normalize_state
+
+# Initialize environment and agent
+env = MissileGuidanceEnv(logging=False)
+agent = DDPGAgent(state_dim=4, action_dim=1)
+
+# 1. Train on 10 fixed scenarios - 10 episodes each
+print("Training on fixed scenarios...")
+for scenario in range(10):
+    print(f"\nScenario {scenario+1}")
+    
+    # Generate and save the first scenario
+    state = env.reset(replay=False)
+    state_0 = state.copy()
+    
+    # Train 10 episodes on this exact scenario
+    for episode in range(10):
+        if episode > 0:
+            # Replay the same scenario
+            state = env.reset(replay=True)
+            state_0 = state.copy()
+        
+        done = False
+        episode_reward = 0
+        
+        while not done:
+            normalized_state = normalize_state(state, state_0)
+            action = agent.select_action(normalized_state)
+            next_state, reward, done, _ = env.step(action)
+            
+            agent.replay_buffer.push(normalized_state, action, reward, 
+                                   normalize_state(next_state, state_0), done)
+            
+            if len(agent.replay_buffer) >= agent.batch_size:
+                agent.train()
+            
+            state = next_state
+            episode_reward += reward
+        
+        print(f"  Episode {episode+1}: Reward = {episode_reward:.2f}")
+
+# 2. Train on 100 random scenarios - 1 episode each
+print("\nTraining on random scenarios...")
+for episode in range(100):
+    state = env.reset(replay=False)
+    state_0 = state.copy()
+    done = False
+    episode_reward = 0
+    
+    while not done:
+        normalized_state = normalize_state(state, state_0)
+        action = agent.select_action(normalized_state)
+        next_state, reward, done, _ = env.step(action)
+        
+        agent.replay_buffer.push(normalized_state, action, reward, 
+                               normalize_state(next_state, state_0), done)
+        
+        if len(agent.replay_buffer) >= agent.batch_size:
+            agent.train()
+        
+        state = next_state
+        episode_reward += reward
+    
+    if episode % 10 == 0:
+        print(f"Random episode {episode}: Reward = {episode_reward:.2f}")
+
+# Test the trained agent 
+print("\nTesting trained agent...")
+test_env = MissileGuidanceEnv(logging=True)
+state = test_env.reset()
+state_0 = state.copy()
+done = False
+
+while not done:
+    normalized_state = normalize_state(state, state_0)
+    action = agent.select_action(normalized_state, add_noise=False)
+    state, reward, done, _ = test_env.step(action)
+
+print(f"Final range: {test_env.r:.2f} m")
+plot_trajectories(test_env)

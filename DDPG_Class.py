@@ -1,12 +1,13 @@
+# ddpg_agent.py
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
-from environment import plot_trajectories, MissileGuidanceEnv
 
-# Neural Networks as per paper architecture
+# Neural Networks
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, amax=100):
         super(Actor, self).__init__()
@@ -40,7 +41,7 @@ class Critic(nn.Module):
         x = torch.cat([state, action], dim=1)
         return self.network(x)
 
-# Experience Replay Buffer
+# Replay Buffer
 class ReplayBuffer:
     def __init__(self, capacity=500000):
         self.buffer = deque(maxlen=capacity)
@@ -75,7 +76,7 @@ class OUNoise:
     def reset(self):
         self.state = np.ones(self.action_dim) * self.mu
 
-# State normalization as per paper
+# State normalization
 def normalize_state(state, state_0):
     r, lambda_, r_dot, lambda_dot = state
     r_0, lambda_0, r_dot_0, lambda_dot_0 = state_0
@@ -111,8 +112,8 @@ class DDPGAgent:
         # Hyperparameters from paper
         self.batch_size = 64
         self.gamma = 0.99
-        self.tau = 0.1  # Paper suggests lower for stability
-        self.gradient_clip = 1.0  # ρ from paper
+        self.tau = 0.1
+        self.gradient_clip = 1.0
         
     def select_action(self, state, add_noise=True):
         state = torch.FloatTensor(state).unsqueeze(0)
@@ -122,7 +123,7 @@ class DDPGAgent:
         if add_noise:
             noise = self.noise.sample()
             action += noise
-            action = np.clip(action, -100, 100)  # amax constraint
+            action = np.clip(action, -100, 100)
         
         return action
     
@@ -170,89 +171,3 @@ class DDPGAgent:
     def soft_update(self, local_model, target_model):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
-
-# Training loop following paper's approach
-def train_ddpg(env, agent, episodes=100):
-    rewards = []
-    
-    for episode in range(episodes):
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        step = 0
-        
-        # Store initial state for normalization
-        state_0 = state.copy()
-        
-        while not done:
-            # Normalize state
-            normalized_state = normalize_state(state, state_0)
-            
-            # Select action
-            action = agent.select_action(normalized_state)
-            
-            # Take step
-            next_state, reward, done, _ = env.step(action)
-            
-            # Store transition
-            agent.replay_buffer.push(normalized_state, action, reward, 
-                                   normalize_state(next_state, state_0), done)
-            
-            # Update networks
-            if len(agent.replay_buffer) >= agent.batch_size:
-                critic_loss, actor_loss = agent.train()
-            
-            state = next_state
-            episode_reward += reward
-            step += 1
-            
-            if done:
-                break
-        
-        rewards.append(episode_reward)
-        
-        if episode % 10 == 0:
-            print(f"Episode {episode}, Reward: {episode_reward:.2f}")
-    
-    return rewards
-
-# Training with characteristic scenarios
-initial_conditions = [
-    # [r, lambda, gamma_M, gamma_T, tau]
-    [4000, np.radians(-10), np.radians(0), np.radians(140), 0.1],
-    [4000, np.radians(10), np.radians(20), np.radians(160), 0.3],
-    [6000, np.radians(-10), np.radians(0), np.radians(140), 0.1],
-    [6000, np.radians(10), np.radians(20), np.radians(160), 0.3],
-    # ... add all scenarios from Table 2
-]
-
-# Initialize agent
-agent = DDPGAgent(state_dim=4, action_dim=1)
-
-# Train on fixed scenarios first
-print("Training on fixed characteristic scenarios...")
-for i, ic in enumerate(initial_conditions):
-    env = MissileGuidanceEnv(logging=False)
-    # Set initial conditions manually
-    rewards = train_ddpg(env, agent, episodes=100)
-    print(f"Scenario {i+1} completed. Best reward: {max(rewards):.2f}")
-
-# Train with random initialization
-print("Training with random initialization...")
-env = MissileGuidanceEnv(logging=False)
-final_rewards = train_ddpg(env, agent, episodes=200)
-
-# Test the trained agent
-print("Testing trained agent...")
-test_env = MissileGuidanceEnv(logging=True)
-state = test_env.reset()
-state_0 = state.copy()
-done = False
-
-while not done:
-    normalized_state = normalize_state(state, state_0)
-    action = agent.select_action(normalized_state, add_noise=False)
-    state, reward, done, _ = test_env.step(action)
-
-print(f"Final range: {test_env.r:.2f} m")
-plot_trajectories(test_env)
