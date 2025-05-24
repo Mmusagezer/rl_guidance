@@ -2,12 +2,18 @@
 
 from environment import MissileGuidanceEnv, plot_trajectories
 from DDPG_Class import DDPGAgent, normalize_state
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+# Create directories for results
+os.makedirs("./results", exist_ok=True)
 
 # Initialize environment and agent
 env = MissileGuidanceEnv(logging=False)
 agent = DDPGAgent(state_dim=4, action_dim=1)
 
-# 1. Train on 10 fixed scenarios - 10 episodes each
+# 1. Train on 10 fixed scenarios - 100 episodes each
 print("Training on fixed scenarios...")
 for scenario in range(10):
     print(f"\nScenario {scenario+1}")
@@ -16,8 +22,8 @@ for scenario in range(10):
     state = env.reset(replay=False)
     state_0 = state.copy()
     
-    # Train 10 episodes on this exact scenario
-    for episode in range(10):
+    # Train 100 episodes on this exact scenario
+    for episode in range(100):
         if episode > 0:
             # Replay the same scenario
             state = env.reset(replay=True)
@@ -42,10 +48,12 @@ for scenario in range(10):
         
         print(f"  Episode {episode+1}: Reward = {episode_reward:.2f}")
 
-# 2. Train on 100 random scenarios - 1 episode each
+# 2. Train on 100 random scenarios - 100 episode each
 print("\nTraining on random scenarios...")
+replay = False
 for episode in range(100):
-    state = env.reset(replay=False)
+    replay = not replay
+    state = env.reset(replay=replay)
     state_0 = state.copy()
     done = False
     episode_reward = 0
@@ -67,17 +75,105 @@ for episode in range(100):
     if episode % 10 == 0:
         print(f"Random episode {episode}: Reward = {episode_reward:.2f}")
 
-# Test the trained agent 
-print("\nTesting trained agent...")
-test_env = MissileGuidanceEnv(logging=True)
-state = test_env.reset()
-state_0 = state.copy()
-done = False
+# Save the trained model (add this if using PyTorch)
+import torch
+os.makedirs("./models", exist_ok=True)
+torch.save({
+    'actor_state_dict': agent.actor.state_dict(),
+    'critic_state_dict': agent.critic.state_dict(),
+}, './models/ddpg_missile_guidance.pt')
+print("Model saved successfully!")
 
-while not done:
-    normalized_state = normalize_state(state, state_0)
-    action = agent.select_action(normalized_state, add_noise=False)
-    state, reward, done, _ = test_env.step(action)
+# Test the trained agent on 10 different scenarios
+print("\nTesting trained agent on 10 scenarios...")
+test_results = {
+    'final_ranges': [],
+    'min_ranges': [],
+    'success_count': 0
+}
 
-print(f"Final range: {test_env.r:.2f} m")
-plot_trajectories(test_env)
+# Create a figure for multiple trajectories
+plt.figure(figsize=(15, 10))
+
+for test_num in range(10):
+    print(f"\nTest {test_num+1}/10")
+    
+    test_env = MissileGuidanceEnv(logging=True)
+    state = test_env.reset()
+    state_0 = state.copy()
+    
+    # Display initial conditions
+    print(f"Initial range: {test_env.r:.2f} m")
+    print(f"Initial LOS angle: {np.degrees(test_env.lambda_):.2f}°")
+    
+    done = False
+    min_range = test_env.r
+    
+    while not done:
+        normalized_state = normalize_state(state, state_0)
+        action = agent.select_action(normalized_state, add_noise=False)
+        state, reward, done, _ = test_env.step(action)
+        
+        # Track minimum range
+        if test_env.r < min_range:
+            min_range = test_env.r
+    
+    # Store results
+    test_results['final_ranges'].append(test_env.r)
+    test_results['min_ranges'].append(min_range)
+    
+    # Count successful interceptions (< 20m)
+    if test_env.r < 20:
+        test_results['success_count'] += 1
+    
+    print(f"Final range: {test_env.r:.2f} m")
+    print(f"Minimum range: {min_range:.2f} m")
+    
+    # Plot trajectory for each test on same figure with different colors
+    color = plt.cm.viridis(test_num/10)  # Use colormap for different colors
+    plt.plot(test_env.xM_log, test_env.yM_log, color=color, 
+             label=f'Test {test_num+1} (Final: {test_env.r:.2f}m)')
+    
+    # For the first 3 tests, also show full visualizations
+    if test_num < 3:
+        plot_trajectories(test_env)
+
+# Finalize the combined trajectory plot
+plt.title('Multiple Test Scenarios - Missile Trajectories')
+plt.xlabel('X Position (m)')
+plt.ylabel('Y Position (m)')
+plt.legend(loc='best')
+plt.grid(True)
+plt.savefig('./results/all_trajectories.png', dpi=300)
+plt.show()
+
+# Print summary statistics
+print("\n" + "="*50)
+print("TEST SUMMARY")
+print("="*50)
+
+print(f"Total tests: 10")
+print(f"Successful interceptions (<20m): {test_results['success_count']}")
+print(f"Success rate: {test_results['success_count']/10*100:.1f}%")
+
+print(f"\nFinal Range Statistics:")
+print(f"  Mean: {np.mean(test_results['final_ranges']):.2f} ± {np.std(test_results['final_ranges']):.2f} m")
+print(f"  Minimum: {np.min(test_results['final_ranges']):.2f} m")
+print(f"  Maximum: {np.max(test_results['final_ranges']):.2f} m")
+
+print(f"\nMinimum Range Achieved:")
+print(f"  Mean: {np.mean(test_results['min_ranges']):.2f} ± {np.std(test_results['min_ranges']):.2f} m")
+print(f"  Best: {np.min(test_results['min_ranges']):.2f} m")
+
+# Create bar chart of final ranges
+plt.figure(figsize=(12, 6))
+plt.bar(range(1, 11), test_results['final_ranges'], color='skyblue')
+plt.axhline(y=20, color='r', linestyle='--', label='Success Threshold (20m)')
+plt.title('Final Range for Each Test Scenario')
+plt.xlabel('Test Scenario')
+plt.ylabel('Final Range (m)')
+plt.xticks(range(1, 11))
+plt.grid(axis='y', alpha=0.3)
+plt.legend()
+plt.savefig('./results/final_ranges.png', dpi=300)
+plt.show()

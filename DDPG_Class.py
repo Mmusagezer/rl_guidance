@@ -59,7 +59,7 @@ class ReplayBuffer:
 
 # Ornstein-Uhlenbeck Noise
 class OUNoise:
-    def __init__(self, action_dim, mu=0, theta=0.15, sigma=0.1, dt=0.01):
+    def __init__(self, action_dim, mu=0, theta=0.05, sigma=0.1, dt=0.01):
         self.action_dim = action_dim
         self.mu = mu
         self.theta = theta

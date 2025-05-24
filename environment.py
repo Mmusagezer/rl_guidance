@@ -167,6 +167,8 @@ class MissileGuidanceEnv(gym.Env):
         kVr = -2   # kVr - velocity penalty coefficient
         kr = 10    # kr - proximity bonus coefficient
         rd = 20    # rd - proximity threshold (m)
+        rdm = 100  # rdm - motivation threshold (m)
+        rdmc = 2   # rdmk - motivation coefficient
         
         # Get zero-effort miss (ZEM) and relative velocities
         Vr, _, ZEM = self._compute_ZEM()
@@ -184,6 +186,8 @@ class MissileGuidanceEnv(gym.Env):
         # rr component from Equation 36
         if self.r <= rd:
             rr = kr
+        elif self.r <= rdm:
+            rr = rdmc
         else:
             rr = 0
         
